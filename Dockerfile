@@ -1,19 +1,24 @@
-# Use OpenJDK 17 base image
-FROM maven:3.8.5-openjdk-17 AS build1
-
-# Copy project files
-COPY . .
-
-# Build the project
-RUN mvn clean package -DskipTests
-
-# Use a smaller runtime image for the final container
-FROM eclipse-openjdk:17-jdk-slim
+# Stage 1: Build
+FROM maven:3.8.5-openjdk-17 AS build
 
 WORKDIR /app
+COPY pom.xml .
+COPY src src
 
-# Copy the built JAR from the previous stage
-COPY --from=build /target/backendproj-0.0.1-SNAPSHOT.jar app.jar
+# Build the project (with retry for network issues)
+RUN mvn clean package -DskipTests || \
+    (sleep 30 && mvn clean package -DskipTests)
+
+# Stage 2: Runtime
+FROM eclipse-temurin:17-jre-alpine
+
+WORKDIR /app
+COPY --from=build /app/target/backendproj-0.0.1-SNAPSHOT.jar app.jar
+
+# Security settings
+RUN addgroup -S spring && adduser -S spring -G spring \
+    && chown spring:spring app.jar
+USER spring
 
 EXPOSE 8080
-ENTRYPOINT [ "java","-jar" "backendproj.jar"]
+ENTRYPOINT ["java", "-jar", "app.jar"]
